@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <math.h>
+#include <set>
+#include <map>
 
 #include "Output.h"
 #include "MtTracert.h"
@@ -381,40 +383,46 @@ Output::text (FILE* out, Tracert *results, Options* opts) {
     	fprintf(stdout, "\n");
 
     // Print a second line if there are MPLS informations
-    //
+    map<int, const TimedProbe*> mpls_map;
+    map<int, set<int> > mpls_flow_ids;
 
-    last_tprobe = NULL;
-    bool new_line = false;
-
-    for (int j = 0; j < opts->max_try; j++) {
+    for (int j = 0; j < results->getNbrProbes(i); j++) {
       const TimedProbe* tprobe = results->getHopInfo(i, j);
       bool show_stack = false;
 
-      if (tprobe != NULL && tprobe->mpls_stack != NULL
-        && last_tprobe != NULL){
-        if (MPLSHeader::compareStacks(tprobe->mpls_stack, tprobe->nbrLabels,
-            last_tprobe->mpls_stack, last_tprobe->nbrLabels) != 0) {
-            fprintf(stdout, ", ");
-            show_stack = true;
+      // probe has an MPLS stack
+      if (tprobe != NULL && tprobe->mpls_stack != NULL) {
+        int label = tprobe->mpls_stack[0];
+        if (mpls_map[label] == NULL) {
+          mpls_map[label] = tprobe;
+          set<int> s_flows;
+          s_flows.insert(tprobe->flow_identifier);
+          mpls_flow_ids[label] = s_flows;
+        } else {
+          mpls_flow_ids[label].insert(tprobe->flow_identifier);
         }
       }
-      else if (tprobe != NULL && tprobe->mpls_stack != NULL) {
-        fprintf(stdout, "   MPLS Label ");
-        show_stack = true;
-        last_tprobe = tprobe;
+    } 
+    
+    // print out MPLS labels
+    bool printed_stacks = false;
+    map<int, const TimedProbe*>::iterator it;
+    set<int>::iterator s_it;
+    for (it = mpls_map.begin(); it != mpls_map.end(); it++) {
+      set<int> flow_ids = mpls_flow_ids[it->first];
+      fprintf(stdout, "%s %d TTL=%d (%d", printed_stacks? ";" : "   MPLS Label", it->first, it->second->mpls_ttl, *(flow_ids.begin()));
+
+      s_it = flow_ids.begin();
+      s_it++;
+      for (; s_it != flow_ids.end(); s_it++) {
+        fprintf(stdout, ",%d", *s_it);        
       }
+      fprintf(stdout, ")");
 
-      if (show_stack) {
-        fprintf(stdout, "%d TTL=%d", tprobe->mpls_stack[0], tprobe->mpls_ttl);
-
-        for (int j = 1; j < tprobe->nbrLabels; j++)
-            fprintf(stdout, " | %d", tprobe->mpls_stack[j]);
-
-        new_line = true;
-      }
-      last_tprobe = tprobe;
+      printed_stacks = true;
     }
-    if (new_line) fprintf(stdout, "\n");
+
+    if (printed_stacks) fprintf(stdout, "\n");
   }
 }
 
